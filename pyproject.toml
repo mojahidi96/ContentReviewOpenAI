@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "content-review-openai"
+version = "0.1.0"
+description = "Private AI content review and document RAG service"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.115.12",
+  "uvicorn[standard]==0.34.2",
+  "pydantic==2.11.4",
+  "pydantic-settings==2.9.1",
+  "google-genai==1.16.1",
+  "chromadb==1.0.9",
+  "PyMuPDF==1.25.5",
+  "python-docx==1.1.2",
+  "openpyxl==3.1.5",
+  "python-multipart==0.0.20",
+  "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.5",
+  "pytest-cov==6.1.1",
+  "ruff==0.11.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
