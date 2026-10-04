@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     google_api_key: SecretStr | None = None
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.8-flash"
     gemini_embedding_model: str = "gemini-embedding-001"
     internal_service_token: SecretStr
     vector_store_type: Literal["chroma"] = "chroma"

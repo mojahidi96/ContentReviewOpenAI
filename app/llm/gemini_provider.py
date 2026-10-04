@@ -34,7 +34,7 @@ class GeminiProvider:
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
-                        response_schema=response_schema,
+                        response_schema=gemini_schema(response_schema),
                         temperature=0.1,
                     ),
                 )
@@ -65,6 +65,27 @@ class GeminiProvider:
                     raise ProviderUnavailable() from exc
                 time.sleep(min(0.25 * (2**attempt), 1.0))
         raise ProviderUnavailable()
+
+
+# JSON Schema keywords the Gemini SDK's Schema type rejects. Strict validation still happens
+# afterwards via parse_structured_output with the full Pydantic model.
+_UNSUPPORTED_SCHEMA_KEYS = {"additionalProperties", "exclusiveMinimum", "exclusiveMaximum", "const"}
+
+
+def gemini_schema(schema: type[BaseModel]) -> dict:
+    root = schema.model_json_schema()
+    defs = root.pop("$defs", {})
+
+    def clean(node):
+        if isinstance(node, dict):
+            if "$ref" in node:
+                return clean(defs[node["$ref"].rsplit("/", 1)[-1]])
+            return {key: clean(value) for key, value in node.items() if key not in _UNSUPPORTED_SCHEMA_KEYS}
+        if isinstance(node, list):
+            return [clean(item) for item in node]
+        return node
+
+    return clean(root)
 
 
 def schema_json(schema: type[BaseModel]) -> str:
