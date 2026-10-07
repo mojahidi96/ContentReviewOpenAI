@@ -5,10 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from typing_extensions import Annotated
 
 
-class ReviewCategory(StrEnum):
-    GRAMMAR = "grammar"
+class IssueType(StrEnum):
     SPELLING = "spelling"
-    PROFANITY = "profanity"
+    GRAMMAR = "grammar"
+    TYPO = "typo"
+    PUNCTUATION = "punctuation"
+    CLARITY = "clarity"
+    SLANG = "slang"
+    VULGARITY = "vulgarity"
+    DEPRECATED_TERM = "deprecated_term"
+    INAPPROPRIATE_LANGUAGE = "inappropriate_language"
 
 
 class Severity(StrEnum):
@@ -22,21 +28,22 @@ class ReviewRequest(BaseModel):
 
     requestId: Annotated[str, StringConstraints(min_length=1, max_length=128)]
     content: Annotated[str, StringConstraints(min_length=1, max_length=100_000)]
-    categories: Annotated[list[ReviewCategory], Field(min_length=1, max_length=3)]
     language: Annotated[str, StringConstraints(min_length=2, max_length=32)] = "en"
 
 
-class Finding(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class IssueLocation(BaseModel):
+    prefix: str = ""
+    suffix: str = ""
 
-    findingId: str
-    category: ReviewCategory
+
+class Issue(BaseModel):
+    id: str
+    issueType: IssueType
     severity: Severity
-    originalText: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
-    suggestedText: Annotated[str, StringConstraints(max_length=2000)]
-    explanation: Annotated[str, StringConstraints(min_length=1, max_length=1000)]
-    startOffset: int = Field(ge=0)
-    endOffset: int = Field(gt=0)
+    original: str
+    improved: str
+    suggestion: str
+    location: IssueLocation
 
 
 class Usage(BaseModel):
@@ -46,27 +53,22 @@ class Usage(BaseModel):
 
 class ReviewResponse(BaseModel):
     requestId: str
-    findings: list[Finding]
+    issues: list[Issue]
     model: str
     usage: Usage
 
 
-class ModelFinding(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    category: ReviewCategory
-    severity: Severity
-    originalText: str
-    suggestedText: str
-    explanation: str
-    startOffset: int = Field(ge=0)
-    endOffset: int = Field(gt=0)
+class ModelIssue(BaseModel):
+    issueType: IssueType
+    severity: Severity = Severity.MEDIUM
+    original: str
+    improved: str
+    suggestion: str = ""
+    location: IssueLocation = IssueLocation()
 
 
 class ModelReview(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    findings: list[ModelFinding]
+    issues: list[ModelIssue]
 
 
 class ModelAnswer(BaseModel):

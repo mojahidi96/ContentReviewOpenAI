@@ -39,14 +39,14 @@ The implementation requests JSON-schema structured output using the configured G
 
 Internal routes require `Authorization: Bearer <INTERNAL_SERVICE_TOKEN>`. Health routes are unauthenticated. No CORS origins are enabled.
 
-* `POST /internal/v1/content-reviews` — selected grammar, spelling, and profanity review.
+* `POST /internal/v1/content-reviews` — AI review of spelling, grammar, typos, punctuation, clarity, slang, vulgarity, and deprecated or inappropriate terms.
 * `POST /internal/v1/documents` — multipart `file` and `tenantId`; synchronous extraction/indexing.
 * `GET /internal/v1/documents/{document_id}?tenantId=...`
 * `DELETE /internal/v1/documents/{document_id}?tenantId=...`
 * `POST /internal/v1/chat` — question and ready document IDs scoped to `tenantId`.
 * `GET /health/live`, `GET /health/ready`
 
-Request and response details are in the API contract documents. Finding offsets use zero-based, end-exclusive UTF-16 code units to match JavaScript strings. Findings are discarded unless their exact original substring validates against the submitted text.
+Request and response details are in the API contract documents. Review issues are located by `prefix`/`suffix` context rather than offsets, and are discarded unless their exact `original` text exists in the submitted content.
 
 ## File processing and persistence
 

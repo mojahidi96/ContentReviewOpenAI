@@ -1,26 +1,45 @@
 from uuid import uuid4
 
-from app.errors import InvalidModelOutput
+from app.errors import InvalidModelOutput, ServiceError
 from app.llm.base import LLMProvider
 from app.llm.prompts import content_review_prompt
 from app.schemas.content_review import (
-    Finding,
+    Issue,
+    IssueLocation,
+    ModelIssue,
     ModelReview,
-    ReviewCategory,
     ReviewRequest,
     ReviewResponse,
     Usage,
 )
 
+MAX_ISSUES = 500
 
-def utf16_slice(content: str, start: int, end: int) -> str | None:
-    encoded = content.encode("utf-16-le")
-    if start < 0 or end <= start or end * 2 > len(encoded):
+
+def _occurrences(content: str, text: str) -> list[int]:
+    positions: list[int] = []
+    start = content.find(text)
+    while start != -1:
+        positions.append(start)
+        start = content.find(text, start + 1)
+    return positions
+
+
+def locate_issue(content: str, issue: ModelIssue) -> int | None:
+    """Return the start index of the issue's original text, or None if it cannot be placed."""
+    positions = _occurrences(content, issue.original)
+    if not positions:
         return None
-    try:
-        return encoded[start * 2 : end * 2].decode("utf-16-le")
-    except UnicodeDecodeError:
-        return None
+    prefix, suffix = issue.location.prefix, issue.location.suffix
+    exact = [
+        pos
+        for pos in positions
+        if content[:pos].endswith(prefix) and content[pos + len(issue.original) :].startswith(suffix)
+    ]
+    if exact:
+        return exact[0]
+    # The model may have trimmed or slightly altered context; accept only an unambiguous match.
+    return positions[0] if len(positions) == 1 else None
 
 
 class ContentReviewService:
@@ -30,47 +49,43 @@ class ContentReviewService:
 
     def review(self, request: ReviewRequest) -> ReviewResponse:
         if len(request.content) > self._max_chars:
-            from app.errors import ServiceError
-
             raise ServiceError("CONTENT_TOO_LARGE", "Review content exceeds the configured limit.", 413)
         result, input_tokens, output_tokens = self._provider.generate_structured(
-            content_review_prompt(request.content, request.categories, request.language), ModelReview
+            content_review_prompt(request.content, request.language), ModelReview
         )
-        findings = self._validated_findings(result, request)
         return ReviewResponse(
             requestId=request.requestId,
-            findings=findings,
+            issues=self._validated_issues(result, request),
             model=self._provider.model_name,
             usage=Usage(inputTokens=input_tokens, outputTokens=output_tokens),
         )
 
     @staticmethod
-    def _validated_findings(result: ModelReview, request: ReviewRequest) -> list[Finding]:
-        findings: list[Finding] = []
-        ranges: list[tuple[int, int]] = []
-        for candidate in result.findings:
-            if candidate.category not in request.categories:
+    def _validated_issues(result: ModelReview, request: ReviewRequest) -> list[Issue]:
+        issues: list[tuple[int, Issue]] = []
+        seen: set[tuple[int, str]] = set()
+        for candidate in result.issues:
+            if not candidate.original or candidate.improved == candidate.original:
                 continue
-            matched = utf16_slice(request.content, candidate.startOffset, candidate.endOffset)
-            if matched != candidate.originalText:
+            start = locate_issue(request.content, candidate)
+            if start is None or (start, candidate.original) in seen:
                 continue
-            if any(candidate.startOffset < end and candidate.endOffset > start for start, end in ranges):
-                continue
-            if candidate.suggestedText == candidate.originalText:
-                continue
-            findings.append(
-                Finding(
-                    findingId=f"finding_{uuid4().hex[:12]}",
-                    category=candidate.category,
-                    severity=candidate.severity,
-                    originalText=candidate.originalText,
-                    suggestedText=candidate.suggestedText,
-                    explanation=candidate.explanation,
-                    startOffset=candidate.startOffset,
-                    endOffset=candidate.endOffset,
+            seen.add((start, candidate.original))
+            issues.append(
+                (
+                    start,
+                    Issue(
+                        id=f"issue-{uuid4().hex[:12]}",
+                        issueType=candidate.issueType,
+                        severity=candidate.severity,
+                        original=candidate.original,
+                        improved=candidate.improved,
+                        suggestion=candidate.suggestion,
+                        location=IssueLocation(prefix=candidate.location.prefix, suffix=candidate.location.suffix),
+                    ),
                 )
             )
-            ranges.append((candidate.startOffset, candidate.endOffset))
-        if len(findings) > 500:
+        if len(issues) > MAX_ISSUES:
             raise InvalidModelOutput()
-        return findings
+        issues.sort(key=lambda pair: pair[0])
+        return [issue for _, issue in issues]
