@@ -10,7 +10,7 @@ class FakeProvider:
     model_name = "test-model"
 
     def generate_structured(self, prompt, response_schema):
-        return ModelReview(findings=[]), None, None
+        return ModelReview(issues=[]), None, None
 
 
 def fake_review_service():
@@ -21,17 +21,17 @@ def fake_review_service():
 
 def test_health_and_internal_auth():
     app.dependency_overrides[get_review_service] = fake_review_service
-    client = TestClient(app)
+    client = TestClient(app).__enter__()
     assert client.get("/health/live").json() == {"status": "live"}
     denied = client.post("/internal/v1/content-reviews", json={
-        "requestId": "r", "content": "Text", "categories": ["grammar"]
+        "requestId": "r", "content": "Text"
     })
     assert denied.status_code == 401
     allowed = client.post(
         "/internal/v1/content-reviews",
         headers={"Authorization": f"Bearer {get_settings().internal_service_token.get_secret_value()}"},
-        json={"requestId": "r", "content": "Text", "categories": ["grammar"]},
+        json={"requestId": "r", "content": "Text"},
     )
     assert allowed.status_code == 200
-    assert allowed.json()["findings"] == []
+    assert allowed.json()["issues"] == []
     app.dependency_overrides.clear()
