@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from app.errors import InvalidModelOutput, ServiceError
+from app.errors import InvalidModelOutput, InvalidModelSelection, ServiceError
 from app.llm.base import LLMProvider
 from app.llm.prompts import content_review_prompt
 from app.schemas.content_review import (
@@ -43,20 +43,24 @@ def locate_issue(content: str, issue: ModelIssue) -> int | None:
 
 
 class ContentReviewService:
-    def __init__(self, provider: LLMProvider, max_chars: int) -> None:
+    def __init__(self, provider: LLMProvider, max_chars: int, allowed_models: list[str] | None = None) -> None:
         self._provider = provider
         self._max_chars = max_chars
+        self._allowed_models = allowed_models
 
     def review(self, request: ReviewRequest) -> ReviewResponse:
         if len(request.content) > self._max_chars:
             raise ServiceError("CONTENT_TOO_LARGE", "Review content exceeds the configured limit.", 413)
+        model = request.model
+        if model and self._allowed_models is not None and model not in self._allowed_models:
+            raise InvalidModelSelection(model, self._allowed_models)
         result, input_tokens, output_tokens = self._provider.generate_structured(
-            content_review_prompt(request.content, request.language), ModelReview
+            content_review_prompt(request.content, request.language), ModelReview, model
         )
         return ReviewResponse(
             requestId=request.requestId,
             issues=self._validated_issues(result, request),
-            model=self._provider.model_name,
+            model=model or self._provider.model_name,
             usage=Usage(inputTokens=input_tokens, outputTokens=output_tokens),
         )
 

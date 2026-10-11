@@ -43,10 +43,14 @@ def create_app() -> FastAPI:
     @application.exception_handler(ServiceError)
     async def service_error_handler(request: Request, exc: ServiceError):
         request_id = request.headers.get("x-request-id")
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"error": {"code": exc.code, "message": exc.message, "requestId": request_id}},
-        )
+        error: dict = {"code": exc.code, "message": exc.message, "requestId": request_id}
+        if exc.details:
+            error["details"] = exc.details
+        headers = {}
+        retry_after = (exc.details or {}).get("retryAfterSeconds")
+        if retry_after is not None:
+            headers["Retry-After"] = str(retry_after)
+        return JSONResponse(status_code=exc.status_code, content={"error": error}, headers=headers)
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):

@@ -1,5 +1,8 @@
 import json
 import logging
+import math
+import re
+import random
 import time
 from typing import TypeVar
 
@@ -8,7 +11,7 @@ from google.genai import errors, types
 from pydantic import BaseModel
 
 from app.config import Settings
-from app.errors import InvalidModelOutput, ProviderRateLimited, ProviderUnavailable
+from app.errors import InvalidModelOutput, ProviderRateLimited, ProviderTimeout, ProviderUnavailable
 from app.llm.structured_output import parse_structured_output
 
 logger = logging.getLogger(__name__)
@@ -25,17 +28,30 @@ class GeminiProvider:
             http_options=types.HttpOptions(timeout=int(settings.provider_timeout_seconds * 1000)),
         )
         self._retries = settings.provider_max_retries
+        self._call_timeout = settings.provider_timeout_seconds
+        self._total_timeout = settings.provider_total_timeout_seconds
 
-    def generate_structured(self, prompt: str, response_schema: type[T]) -> tuple[T, int | None, int | None]:
+    def generate_structured(
+        self, prompt: str, response_schema: type[T], model: str | None = None
+    ) -> tuple[T, int | None, int | None]:
+        model = model or self.model_name
+        deadline = time.monotonic() + self._total_timeout
         for attempt in range(self._retries + 1):
+            # Never start a call that cannot finish inside the overall budget: the caller
+            # (Node) gives up at its own timeout and would otherwise leave this call running.
+            remaining = deadline - time.monotonic()
+            if remaining < 2:
+                logger.warning("Gemini call budget of %.0fs exhausted", self._total_timeout)
+                raise ProviderTimeout()
             try:
                 response = self._client.models.generate_content(
-                    model=self.model_name,
+                    model=model,
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=gemini_schema(response_schema),
                         temperature=0.1,
+                        http_options=types.HttpOptions(timeout=int(min(self._call_timeout, remaining) * 1000)),
                     ),
                 )
                 if not response.text:
@@ -50,21 +66,45 @@ class GeminiProvider:
             except errors.APIError as exc:
                 status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
                 if status == 429:
-                    raise ProviderRateLimited() from exc
+                    raise rate_limit_error(exc, model) from exc
                 if status and int(status) < 500:
+                    logger.warning("Gemini rejected the request: %s", exc)
                     raise InvalidModelOutput() from exc
                 if attempt >= self._retries:
-                    logger.warning("Gemini provider failed after bounded retries")
+                    logger.warning("Gemini provider failed after bounded retries: %s", exc)
                     raise ProviderUnavailable() from exc
-                time.sleep(min(0.25 * (2**attempt), 1.0))
-            except (InvalidModelOutput, ProviderRateLimited):
+                _backoff(attempt)
+            except (InvalidModelOutput, ProviderRateLimited, ProviderTimeout):
                 raise
             except Exception as exc:
                 if attempt >= self._retries:
-                    logger.warning("Gemini provider failed after bounded retries")
+                    logger.warning("Gemini provider failed after bounded retries: %s", exc)
                     raise ProviderUnavailable() from exc
-                time.sleep(min(0.25 * (2**attempt), 1.0))
+                _backoff(attempt)
         raise ProviderUnavailable()
+
+
+def rate_limit_error(exc: errors.APIError, model: str) -> ProviderRateLimited:
+    """Extract the quota scope and reset delay from a Gemini 429 response."""
+    retry_after: int | None = None
+    scope = "unknown"
+    body = getattr(exc, "details", None)
+    items = body.get("error", body).get("details", []) if isinstance(body, dict) else []
+    for item in items:
+        kind = str(item.get("@type", ""))
+        if kind.endswith("RetryInfo"):
+            match = re.fullmatch(r"(\d+(?:\.\d+)?)s", str(item.get("retryDelay", "")))
+            if match:
+                retry_after = math.ceil(float(match.group(1)))
+        elif kind.endswith("QuotaFailure"):
+            quota_id = " ".join(str(v.get("quotaId", "")) for v in item.get("violations", []))
+            scope = "daily" if "PerDay" in quota_id else "minute" if "PerMinute" in quota_id else scope
+    return ProviderRateLimited(model=model, retry_after_seconds=retry_after, quota_scope=scope)
+
+
+def _backoff(attempt: int) -> None:
+    # Gemini 503 "high demand" spikes last seconds, so back off longer than sub-second, with jitter.
+    time.sleep(min(1.0 * (2**attempt), 8.0) + random.uniform(0, 0.5))
 
 
 # JSON Schema keywords the Gemini SDK's Schema type rejects. Strict validation still happens

@@ -29,6 +29,12 @@ class ReviewRequest(BaseModel):
     requestId: Annotated[str, StringConstraints(min_length=1, max_length=128)]
     content: Annotated[str, StringConstraints(min_length=1, max_length=100_000)]
     language: Annotated[str, StringConstraints(min_length=2, max_length=32)] = "en"
+    model: Annotated[str, StringConstraints(min_length=1, max_length=100)] | None = None
+
+
+class ModelListResponse(BaseModel):
+    defaultModel: str
+    models: list[str]
 
 
 class IssueLocation(BaseModel):
