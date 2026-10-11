@@ -8,4 +8,6 @@ T = TypeVar("T", bound=BaseModel)
 class LLMProvider(Protocol):
     model_name: str
 
-    def generate_structured(self, prompt: str, response_schema: type[T]) -> tuple[T, int | None, int | None]: ...
+    def generate_structured(
+        self, prompt: str, response_schema: type[T], model: str | None = None
+    ) -> tuple[T, int | None, int | None]: ...

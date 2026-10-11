@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends
 
 from app.dependencies import get_llm_limiter, get_review_service, require_internal_auth
 from app.errors import ServiceError
-from app.schemas.content_review import ReviewRequest, ReviewResponse
+from app.config import Settings, get_settings
+from app.schemas.content_review import ModelListResponse, ReviewRequest, ReviewResponse
 from app.services.content_review_service import ContentReviewService
 
 router = APIRouter(
@@ -12,6 +13,11 @@ router = APIRouter(
     tags=["content-review"],
     dependencies=[Depends(require_internal_auth)],
 )
+
+
+@router.get("/models", response_model=ModelListResponse)
+def list_models(settings: Settings = Depends(get_settings)) -> ModelListResponse:
+    return ModelListResponse(defaultModel=settings.gemini_model, models=settings.selectable_models)
 
 
 @router.post("", response_model=ReviewResponse)

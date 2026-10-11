@@ -37,7 +37,9 @@ def get_repository() -> DocumentRepository:
 def get_review_service(request: Request) -> ContentReviewService:
     settings = get_settings()
     return ContentReviewService(
-        provider=get_provider(), max_chars=settings.max_review_content_chars
+        provider=get_provider(),
+        max_chars=settings.max_review_content_chars,
+        allowed_models=settings.selectable_models,
     )
 
 

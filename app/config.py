@@ -1,9 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     port: int = 8000
     google_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.8-flash"
+    allowed_gemini_models: Annotated[list[str], NoDecode] = [
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+        "gemini-flash-latest",
+    ]
     gemini_embedding_model: str = "gemini-embedding-001"
     internal_service_token: SecretStr
     vector_store_type: Literal["chroma"] = "chroma"
@@ -27,10 +34,24 @@ class Settings(BaseSettings):
     chunk_overlap: int = 150
     retrieval_count: int = 5
     similarity_threshold: float = 0.25
-    provider_timeout_seconds: float = 30
-    provider_max_retries: int = 2
+    provider_timeout_seconds: float = 25
+    # Hard cap for one review across all retries. Must stay below the Node client timeout (60s).
+    provider_total_timeout_seconds: float = 45
+    provider_max_retries: int = 3
     max_concurrent_llm_requests: int = 4
     log_level: str = "INFO"
+
+    @field_validator("allowed_gemini_models", mode="before")
+    @classmethod
+    def split_models(cls, value):
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @property
+    def selectable_models(self) -> list[str]:
+        """Allowed models, always including the configured default (first)."""
+        return [self.gemini_model, *[m for m in self.allowed_gemini_models if m != self.gemini_model]]
 
     @model_validator(mode="after")
     def validate_limits_and_credentials(self) -> "Settings":
@@ -42,6 +63,8 @@ class Settings(BaseSettings):
             raise ValueError("CHUNK_OVERLAP must be non-negative and smaller than MAX_CHUNK_SIZE")
         if min(self.max_upload_size_mb, self.max_document_pages, self.max_extracted_chars) <= 0:
             raise ValueError("Upload and document limits must be positive")
+        if not 0 < self.provider_timeout_seconds <= self.provider_total_timeout_seconds:
+            raise ValueError("PROVIDER_TIMEOUT_SECONDS must be positive and not exceed PROVIDER_TOTAL_TIMEOUT_SECONDS")
         if self.provider_max_retries < 0 or self.max_concurrent_llm_requests <= 0:
             raise ValueError("Provider retry and concurrency limits are invalid")
         return self
