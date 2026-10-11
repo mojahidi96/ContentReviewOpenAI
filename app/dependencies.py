@@ -8,6 +8,7 @@ from app.embeddings.gemini_embeddings import GeminiEmbeddings
 from app.llm.gemini_provider import GeminiProvider
 from app.services.chat_service import ChatService
 from app.services.content_review_service import ContentReviewService
+from app.services.deprecated_terms import DeprecatedTerms
 from app.services.document_repository import DocumentRepository
 from app.services.document_service import DocumentService
 from app.vector_store.chroma_store import ChromaStore
@@ -34,9 +35,15 @@ def get_repository() -> DocumentRepository:
     return DocumentRepository(get_settings().metadata_db_path)
 
 
+@lru_cache
+def get_deprecated_terms() -> DeprecatedTerms:
+    return DeprecatedTerms(get_settings().deprecated_terms_file)
+
+
 def get_review_service(request: Request) -> ContentReviewService:
     settings = get_settings()
     return ContentReviewService(
+        deprecated_terms=get_deprecated_terms(),
         provider=get_provider(),
         max_chars=settings.max_review_content_chars,
         allowed_models=settings.selectable_models,

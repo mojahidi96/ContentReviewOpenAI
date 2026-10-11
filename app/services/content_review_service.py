@@ -1,19 +1,25 @@
+import logging
 from uuid import uuid4
 
 from app.errors import InvalidModelOutput, InvalidModelSelection, ServiceError
 from app.llm.base import LLMProvider
+from app.services.deprecated_terms import DeprecatedTerms
 from app.llm.prompts import content_review_prompt
 from app.schemas.content_review import (
     Issue,
     IssueLocation,
+    IssueType,
     ModelIssue,
     ModelReview,
     ReviewRequest,
     ReviewResponse,
+    Severity,
     Usage,
 )
 
+logger = logging.getLogger(__name__)
 MAX_ISSUES = 500
+CONTEXT_CHARS = 30
 
 
 def _occurrences(content: str, text: str) -> list[int]:
@@ -43,7 +49,14 @@ def locate_issue(content: str, issue: ModelIssue) -> int | None:
 
 
 class ContentReviewService:
-    def __init__(self, provider: LLMProvider, max_chars: int, allowed_models: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        provider: LLMProvider,
+        max_chars: int,
+        allowed_models: list[str] | None = None,
+        deprecated_terms: DeprecatedTerms | None = None,
+    ) -> None:
+        self._deprecated_terms = deprecated_terms
         self._provider = provider
         self._max_chars = max_chars
         self._allowed_models = allowed_models
@@ -57,15 +70,63 @@ class ContentReviewService:
         result, input_tokens, output_tokens = self._provider.generate_structured(
             content_review_prompt(request.content, request.language), ModelReview, model
         )
+        located = self._validated_issues(result, request)
+        model_issue_count = len(located)
+        located = self._merge_dictionary_issues(located, request.content)
+        issues = [issue for _, issue in located]
+        logger.info(
+            "Review %s: model returned %d issues, %d kept after validation, %d total with dictionary",
+            request.requestId,
+            len(result.issues),
+            model_issue_count,
+            len(issues),
+        )
         return ReviewResponse(
             requestId=request.requestId,
-            issues=self._validated_issues(result, request),
+            issues=issues,
             model=model or self._provider.model_name,
             usage=Usage(inputTokens=input_tokens, outputTokens=output_tokens),
         )
 
+    def _merge_dictionary_issues(
+        self, located: list[tuple[int, Issue]], content: str
+    ) -> list[tuple[int, Issue]]:
+        """Add deprecated-term issues from the Excel dictionary; they replace overlapping model issues."""
+        if self._deprecated_terms is None:
+            return located
+        matches = self._deprecated_terms.find(content)
+        if not matches:
+            return located
+        spans = [(m.start, m.end) for m in matches]
+
+        def overlaps(start: int, original: str) -> bool:
+            end = start + len(original)
+            return any(start < s_end and s_start < end for s_start, s_end in spans)
+
+        kept = [(start, issue) for start, issue in located if not overlaps(start, issue.original)]
+        for m in matches:
+            kept.append(
+                (
+                    m.start,
+                    Issue(
+                        id=f"issue-{uuid4().hex[:12]}",
+                        issueType=IssueType.DEPRECATED_TERM,
+                        severity=Severity.MEDIUM,
+                        original=m.text,
+                        improved=m.replacement,
+                        suggestion=f'"{m.term}" is a deprecated term. Use "{m.replacement}" instead.',
+                        location=IssueLocation(
+                            prefix=content[max(0, m.start - CONTEXT_CHARS) : m.start],
+                            suffix=content[m.end : m.end + CONTEXT_CHARS],
+                        ),
+                    ),
+                )
+            )
+        kept.sort(key=lambda pair: pair[0])
+        return kept
+
     @staticmethod
-    def _validated_issues(result: ModelReview, request: ReviewRequest) -> list[Issue]:
+    def _validated_issues(result: ModelReview, request: ReviewRequest) -> list[tuple[int, Issue]]:
         issues: list[tuple[int, Issue]] = []
         seen: set[tuple[int, str]] = set()
         for candidate in result.issues:
@@ -84,7 +145,7 @@ class ContentReviewService:
                         severity=candidate.severity,
                         original=candidate.original,
                         improved=candidate.improved,
-                        suggestion=candidate.suggestion,
+                        suggestion=candidate.suggestion.strip() or "Review this text.",
                         location=IssueLocation(prefix=candidate.location.prefix, suffix=candidate.location.suffix),
                     ),
                 )
@@ -92,4 +153,4 @@ class ContentReviewService:
         if len(issues) > MAX_ISSUES:
             raise InvalidModelOutput()
         issues.sort(key=lambda pair: pair[0])
-        return [issue for _, issue in issues]
+        return issues

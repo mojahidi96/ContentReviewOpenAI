@@ -60,4 +60,8 @@ When the provider quota is exhausted the response is `429 LLM_QUOTA_EXHAUSTED` w
 
 `quotaScope` is `daily`, `minute` or `unknown`. 429s are not retried by this service.
 
+**Deprecated terms.** Company-specific deprecated terms live in `resources/deprecated_terms.xlsx` (first sheet; columns `Deprecated Term` and `Replacement Term`, one pair per row). They are matched deterministically (case-insensitive, whole words, optional plural `s`, multi-word terms, longest first), returned as `deprecated_term` issues with the replacement in `improved`, and they replace any overlapping issue from the model. Edit the file and save; changes are picked up on the next review without a restart. Set `DEPRECATED_TERMS_FILE` to use another path.
+
+**Acronyms.** The model flags the first occurrence of each undefined acronym or abbreviation (ASAP, FOMO, ...) as a `clarity` issue whose `improved` spells it out, e.g. `as soon as possible (ASAP)`.
+
 **Breaking change:** the `categories` request field and the `findings`/offset response shape were removed.

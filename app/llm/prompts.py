@@ -21,6 +21,25 @@ IMPORTANT RULES:
 - Return ONLY the issues that actually exist.
 - Do not invent issues.
 - Do not flag valid technical terms, product names, company names, acronyms, URLs, email addresses, code, or domain-specific terminology as spelling mistakes unless they are clearly incorrect.
+- Random or meaningless character sequences (for example "sfsdf", "asdkjh", "qwrtp") are NOT
+  acronyms, product names, or technical terms. Flag each one as "spelling" (or "typo" when it looks
+  like a mistyped real word). Put the most likely intended word in "improved"; if no real word can
+  be inferred, use an empty string "" for "improved" and say in "suggestion" that the text is not a
+  recognizable word. Only treat a token as an acronym or technical term when the surrounding text
+  makes that plausible (all-caps acronyms, code, identifiers, URLs).
+- Text made up mostly of meaningless words must still produce issues; never return an empty list
+  for it. Flag every distinct occurrence, in document order, and use a "prefix"/"suffix" that tells
+  repeated occurrences apart.
+- ACRONYMS AND ABBREVIATIONS: readers may not know what an acronym, initialism or slang
+  abbreviation stands for (for example "ASAP", "FOMO", "KPI", "ETA", "FYI", "TBD"). Flag the FIRST
+  occurrence of each such term in the content when its full form is not given anywhere in the
+  content (for example as "as soon as possible (ASAP)" or "ASAP (as soon as possible)"). Use
+  issueType "clarity" and severity "low". Set "original" to the acronym exactly as written,
+  "improved" to the full form followed by the acronym in parentheses (for example
+  "as soon as possible (ASAP)"), and "suggestion" to a short note that the acronym should be
+  spelled out on first use. Flag each distinct acronym once (first occurrence only), and do not
+  flag it when the document already defines it. Do not flag units, file extensions, URLs, email
+  addresses, code, identifiers, or the document's own product, company or proper names.
 - Preserve the author's intended meaning.
 - Do not change the writing style unnecessarily.
 - If a sentence is grammatically correct but could be improved stylistically, do not flag it unless the improvement is meaningful.
@@ -52,6 +71,12 @@ Use one of these exact values:
 "vulgarity"
 "deprecated_term"
 "inappropriate_language"
+
+COMPANY DEPRECATED-TERM LIST:
+
+A separate dictionary check already flags the company's own deprecated terms (such as
+"customer" -> "client") and adds them to the result. Do not duplicate those. You must still flag
+other clearly outdated or non-inclusive terms on your own, as described below.
 
 DEPRECATED TERM EXAMPLES:
 

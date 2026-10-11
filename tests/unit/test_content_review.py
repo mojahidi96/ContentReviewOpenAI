@@ -147,3 +147,23 @@ def test_provider_stops_retrying_when_total_budget_is_spent(monkeypatch):
     with pytest.raises(ProviderTimeout):
         provider.generate_structured("p", ModelReview)
     assert Models.calls <= 3 and clock["now"] <= 60
+
+
+def test_gibberish_issue_with_empty_improvement_is_kept():
+    content = "sfsdf sdf sdf"
+    provider = FakeProvider(
+        ModelReview(
+            issues=[
+                issue("sfsdf", "", "", " sdf sdf"),
+                issue("sdf", "", "sfsdf ", " sdf"),
+                issue("sdf", "", "sfsdf sdf ", ""),
+            ]
+        )
+    )
+    response = ContentReviewService(provider, 1000).review(ReviewRequest(requestId="r", content=content))
+    assert [i.original for i in response.issues] == ["sfsdf", "sdf", "sdf"]
+
+
+def test_prompt_tells_model_to_flag_gibberish():
+    prompt = content_review_prompt("sfsdf", "en")
+    assert "meaningless" in prompt and "never return an empty list" in prompt

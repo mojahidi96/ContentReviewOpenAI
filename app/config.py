@@ -21,6 +21,7 @@ class Settings(BaseSettings):
         "gemini-3.8-flash",
         "gemini-flash-latest",
     ]
+    deprecated_terms_file: Path = Path("resources/deprecated_terms.xlsx")
     gemini_embedding_model: str = "gemini-embedding-001"
     internal_service_token: SecretStr
     vector_store_type: Literal["chroma"] = "chroma"
